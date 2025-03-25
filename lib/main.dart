@@ -1,13 +1,147 @@
-import 'package:flutter/material.dart';
+import 'dart:io' show Platform;
 
-void main() {
+import 'package:alarm/alarm.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_alquran_app/core/constants/colors.dart';
+import 'package:flutter_alquran_app/core/services/build_alarm_setting.dart';
+import 'package:flutter_alquran_app/core/utils/permission.dart';
+import 'package:flutter_alquran_app/core/utils/permission_utils.dart';
+import 'package:flutter_alquran_app/presentations/home/main_page.dart';
+import 'package:hijriyah_indonesia/hijriyah_indonesia.dart';
+import 'package:quran_flutter/quran_flutter.dart';
+import 'package:adhan/adhan.dart';
+import 'package:geocoding/geocoding.dart';
+
+import 'data/datasources/db_local_datasource.dart';
+
+String arabic = 'ar';
+String indonesia = 'id';
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Quran.initialize();
+  await Alarm.init();
+  AlarmPermissions.checkNotificationPermission();
+  if (Alarm.android) {
+    AlarmPermissions.checkAndroidScheduleExactAlarmPermission();
+  }
+  Hijriyah.setLocal(indonesia);
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  bool loading = false;
+  var myCoordinates = Coordinates(-7.7421697, 110.3751855);
+  late bool creating;
+  late DateTime selectedDateTime;
+  late bool loopAudio;
+  late bool vibrate;
+  late double? volume;
+  late Duration? fadeDuration;
+  late bool staircaseFade;
+  late String assetAudio;
+  String locationNow = 'Kota Jakarta, Indonesia';
+
+  @override
+  void initState() {
+    // selectedDateTime = DateTime.now().add(const Duration(hours: 12));
+    // selectedDateTime = selectedDateTime.copyWith(second: 0, microsecond: 0);
+    loopAudio = true;
+    vibrate = true;
+    volume = 0.5;
+    fadeDuration = null;
+    staircaseFade = false;
+    assetAudio = 'assets/audios/mecca.mp3';
+    loadLocation().then((_) {
+      _setPrayerAlarms();
+    });
+    super.initState();
+  }
+
+  Future<void> _getLocation(double lat, double lng) async {
+    try {
+      List<Placemark> placemarks = await placemarkFromCoordinates(lat, lng);
+      Placemark placemark = placemarks[0];
+      String city = placemark.locality ?? 'Unkwon';
+      setState(() {
+        locationNow = '$city, Indonesia';
+      });
+    } catch (e) {
+      print('Error getting location: $e');
+    }
+  }
+
+  refreshLocation() async {
+    await requestLocationPermission();
+    final location = await determinePosition();
+    myCoordinates = Coordinates(location.latitude, location.longitude);
+    String latLang = '${myCoordinates.latitude},${myCoordinates.longitude}';
+    await DbLocalDatasource().saveLatLng(location.latitude, location.longitude);
+  }
+
+  Future<void> loadLocation() async {
+    await requestLocationPermission();
+    final latLang = await DbLocalDatasource().getLatLng();
+
+    if (latLang.isEmpty) {
+      await refreshLocation();
+    } else {
+      double lat = latLang[0];
+      double lng = latLang[1];
+
+      myCoordinates = Coordinates(lat, lng);
+      await _getLocation(lat, lng);
+    }
+  }
+
+  Future<void> _setPrayerAlarms() async {
+    final params = CalculationMethod.singapore.getParameters();
+    params.madhab = Madhab.shafi;
+
+    final prayerTimes = PrayerTimes.today(myCoordinates, params);
+
+    List<DateTime> prayerTimesList = [
+      prayerTimes.fajr,
+      prayerTimes.dhuhr,
+      prayerTimes.asr,
+      prayerTimes.maghrib,
+      prayerTimes.isha,
+    ];
+
+    List<String> prayerNames = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
+    DateTime now = DateTime.now();
+    await Alarm.stopAll();
+
+    for (int i = 0; i < prayerTimesList.length; i++) {
+      DateTime prayerTime = prayerTimesList[i];
+
+      if (prayerTime.isBefore(now)) {
+        prayerTime = prayerTime.add(const Duration(days: 1));
+      }
+      Alarm.set(
+        alarmSettings: buildAlarmSettings(
+          staircaseFade: staircaseFade,
+          volume: volume!,
+          fadeDuration: fadeDuration,
+          selectedDateTime: prayerTime,
+          loopAudio: loopAudio,
+          vibrate: vibrate,
+          assetAudio: assetAudio,
+          adhan: prayerNames[i],
+          locationNow: locationNow,
+        ),
+      ).then((res) {
+        // log('Alarm untuk ${prayerNames[i]} diatur pada $prayerTime');
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -28,98 +162,10 @@ class MyApp extends StatelessWidget {
         //
         // This works for code too, not just values: Most code changes can be
         // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.fromSeed(seedColor: AppColors.primary),
         useMaterial3: true,
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
-    );
-  }
-}
-
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
-
-  @override
-  State<MyHomePage> createState() => _MyHomePageState();
-}
-
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
-
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
-    return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text(
-              'You have pushed the button this many times:',
-            ),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-          ],
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
+      home: const MainPageScreen(),
     );
   }
 }

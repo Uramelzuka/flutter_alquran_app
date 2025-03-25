@@ -1,0 +1,2 @@
+/Users/daf/Documents/Personal/Project/Flutter/flutter_alquran_app/android/app/.cxx/Debug/2i4j2p6j/x86_64/CMakeFiles/edit_cache.dir
+/Users/daf/Documents/Personal/Project/Flutter/flutter_alquran_app/android/app/.cxx/Debug/2i4j2p6j/x86_64/CMakeFiles/rebuild_cache.dir
